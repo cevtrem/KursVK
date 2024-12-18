@@ -4,37 +4,57 @@ from pprint import pprint
 from tqdm import tqdm
 import requests
 
-config = configparser.ConfigParser()
-config.read("settings.ini")
-VK_TOKEN = config['VK']['servis_key']
-YD_TOKEN = config['YD']['access_token_yd']
+
+def read_token_vk():
+    config = configparser.ConfigParser()
+    config.read("settings.ini")
+    access_token_vk = config['VK']['servis_key']
+    return access_token_vk
+
+def read_token_yd():
+    config = configparser.ConfigParser()
+    config.read("settings.ini")
+    token_yd = config['YD']['access_token_yd']
+    return token_yd
+
+def result_to_json(list_info_files):
+    with open('data.json', 'w') as json_file:
+        json.dump(list_info_files, json_file)
+    return json_file
 
 
 class VK:
 
-    list_sizes = ['w', 'z', 'y', 'r', 'q', 'p', 'o', 'x', 'm', 's']
-
-    def __init__(self, access_token_vk, version='5.199'):
-
+    def __init__(self, user_ids, version='5.199'):
+        self.user_ids = user_ids
+        access_token_vk = read_token_vk()
         self.base_address = 'https://api.vk.com/method/'
         self.params = { 'access_token': access_token_vk, 'v' : version }
+        self.user_id = self.get_user_id(user_ids)
 
-    def get_photos(self, user_id, extended=1, count=5, album_id='wall'):
+    def get_user_id(self, user_ids):
+        self.user_ids = user_ids
+        url = f'{self.base_address}users.get'
+        params = {'user_ids': user_ids}
+        params.update(self.params)
+        responce = requests.get(url, params).json()
+        user_id = responce['response'][0]['id']
+        return user_id
 
+    def get_photos(self, album_id='wall', extended=1, count=5, ):
+        self.album_id = album_id
         url = f'{self.base_address}photos.get'
-        params = {'owner_id': user_id, 'album_id': album_id, 'extended': extended}
+        params = {'owner_id': self.user_id, 'album_id': self.album_id, 'extended': extended}
         params.update(self.params)
         response = requests.get( url, params=params).json()
         return response
 
-
-    def found_max_size_photo(self, user_id, count=5):
-
-        self.user_id = user_id
+    def found_max_size_photo(self, count=5):
+        list_sizes = ['w', 'z', 'y', 'r', 'q', 'p', 'o', 'x', 'm', 's']
         saved_photo = []
         count_saved_photo = 0
-        photos_json = self.get_photos(user_id)
-        for vol_size in self.list_sizes:
+        photos_json = self.get_photos()
+        for vol_size in list_sizes:
             for photo in photos_json['response']['items']:
                 for photo_size in photo['sizes']:
                     if photo_size['type'] == vol_size:
@@ -49,36 +69,48 @@ class VK:
                             saved_photo.append(photo_data)
         return saved_photo
 
-    def create_folder_yadisk(self, folder_name):
 
+class YD:
+
+    def __init__(self):
+        token_yd = read_token_yd()
+        self.headers = {'Authorization': token_yd}
+
+    def create_folder_yadisk(self, folder_name):
         self.folder_name = folder_name
         yadi_url_put = 'https://cloud-api.yandex.net/v1/disk/resources'
-        headers = { 'Authorization': YD_TOKEN }
         params = { 'path': folder_name }
-        response = requests.put(yadi_url_put, headers=headers, params=params)
+        response = requests.put(yadi_url_put, headers=self.headers, params=params)
         return folder_name
 
-    def save_file_yadisk(self, folder_name, user_id, count=5):
-        result = []
+    def save_file_yadisk(self, user_id, folder_name, count=5):
+        self.user_id = user_id
+        self.folder_name = folder_name
+        list_info_files = []
         yadi_url_post = 'https://cloud-api.yandex.net/v1/disk/resources/upload'
-        headers = {'Authorization': YD_TOKEN}
-        saved_photo = self.found_max_size_photo(user_id)
+        saved_photo = VK.found_max_size_photo(vk_client)
         folder = self.create_folder_yadisk(folder_name)
         for photo in tqdm(saved_photo, ncols=80):
             folder_url = f'{folder}/{photo['file_name']}'
             file_url = photo['file_url']
             params = {'path': folder_url,
                   'url': file_url}
-            response = requests.post(yadi_url_post, headers=headers, params=params)
+            response = requests.post(yadi_url_post, headers=self.headers, params=params)
             res = {
                 'file_name' : photo['file_name'],
                 'size' : photo['size']
             }
-            result.append(res)
-        with open('data.json', 'w') as json_file:
-            json.dump(result, json_file)
-        return json_file, pprint(f'Файлы {result} были успешно сохранены на Яндекс Диске')
+            list_info_files.append(res)
+        pprint(f'Файлы {list_info_files} были успешно сохранены на Яндекс Диске')
+        return list_info_files
 
 
-vk_client = VK(VK_TOKEN)
-vk_client.save_file_yadisk('название папки', ID пользователя ВК)
+
+input_user_id = input('Введите id или screen_name пользователя Вконтакте: ')
+input_folder_name = input('Введите название папки для Яндекс диска: ')
+
+
+vk_client = VK(input_user_id)
+yd_client = YD()
+result = yd_client.save_file_yadisk(input_user_id, input_folder_name)
+result_to_json(result)
